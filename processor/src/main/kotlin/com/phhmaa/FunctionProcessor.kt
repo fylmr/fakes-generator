@@ -5,34 +5,11 @@ package com.phhmaa
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.squareup.kotlinpoet.FileSpec
+import com.squareup.kotlinpoet.FunSpec
+import com.squareup.kotlinpoet.TypeSpec
+import com.squareup.kotlinpoet.ksp.writeTo
 
-
-/**
- * This processor handles interfaces annotated with @Function.
- * It generates the function for each annotated interface. For each property of the interface it adds an argument for
- * the generated function with the same type and name.
- *
- * For example, the following code:
- *
- * ```kotlin
- * @Function(name = "myFunction")
- * interface MyFunction {
- *     val arg1: String
- *     val arg2: List<List<*>>
- * }
- * ```
- *
- * Will generate the corresponding function:
- *
- * ```kotlin
- * fun myFunction(
- *     arg1: String,
- *     arg2: List<List<*>>
- * ) {
- *     println("Hello from myFunction")
- * }
- * ```
- */
 class FunctionProcessor(
     private val options: Map<String, String>,
     private val logger: KSPLogger,
@@ -52,21 +29,20 @@ class FunctionProcessor(
         val packageName = symbol.packageName.asString()
         val className = symbol.simpleName.asString()
         val generatedClassName = "${className}Fake"
-        val file = codeGenerator.createNewFile(
-            Dependencies(false, symbol.containingFile!!),
-            packageName,
-            generatedClassName
-        )
-        file.bufferedWriter().use { writer ->
-            writer.write(
-                """
-                package $packageName
-                
-                class $generatedClassName {
-                    // This is a generated fake class
-                }
-                """.trimIndent()
+
+        // Define the class structure
+        val classBuilder = TypeSpec.classBuilder(generatedClassName)
+            .addFunction(
+                FunSpec.builder("fakeFunction")
+                    .addStatement("")
+                    .build()
             )
-        }
+
+        // Create the .kt file
+        val fileSpec = FileSpec.builder(packageName, generatedClassName)
+            .addType(classBuilder.build())
+            .build()
+
+        fileSpec.writeTo(codeGenerator, dependencies = Dependencies(false, symbol.containingFile!!))
     }
 }
