@@ -1,76 +1,25 @@
-@file:Suppress("UnnecessaryVariable")
-
-package com.phhmaa
+package com.phhmaa.generator
 
 import com.google.devtools.ksp.getVisibility
-import com.google.devtools.ksp.processing.*
+import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.symbol.*
+import com.phhmaa.FakeReturnValue
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ksp.toClassName
 import com.squareup.kotlinpoet.ksp.toKModifier
 import com.squareup.kotlinpoet.ksp.toTypeName
-import com.squareup.kotlinpoet.ksp.writeTo
 
-/**
- * This processor handles interfaces annotated with @GenerateFake.
- * It generates a fake class for each annotated interface. The fake class contains a fake implementation for each
- * function declared in the interface.
- *
- * Input:
- * ```
- * data class Order(
- *     val id: String,
- *     val name: String,
- *     val price: Double,
- *     val quantity: Int,
- * )
- *
- * @GenerateFake
- * internal interface OrderRepository {
- *     fun createOrder(order: Order)
- *     fun getOrder(id: String): Order
- *     fun deleteOrder(id: String)
- *
- *     @IgnoreFake
- *     fun updateOrder(id: String, order: Order): Int
- * }
- * ```
- * Desired output:
- * ```
- * class FakeOrderRepository(
- *     val fakeCreateOrder: (Order) -> Unit = {},
- *     val fakeGetOrder: (String) -> Order = { Order("1", "fake order", 0.0, 0) },
- *     val fakeDeleteOrder: (String) -> Unit = {},
- * ) : OrderRepository {
- *     override fun createOrder(order: Order) = fakeCreateOrder(order)
- *     override fun getOrder(id: String): Order = fakeGetOrder(id)
- *     override fun deleteOrder(id: String) = fakeDeleteOrder(id)
- * }
- * ```
- */
-class FunctionProcessor(
-    private val codeGenerator: CodeGenerator,
+class FakeFileGenerator(
     private val logger: KSPLogger,
-) : SymbolProcessor {
-    override fun process(resolver: Resolver): List<KSAnnotated> {
-        val symbols = resolver.getSymbolsWithAnnotation(GenerateFake::class.qualifiedName!!)
-        symbols.forEach { symbol ->
-            if (symbol is KSClassDeclaration) {
-                generateFakeClass(symbol)
-            }
-        }
-        return emptyList()
-    }
+) {
 
-    private fun generateFakeClass(symbol: KSClassDeclaration) {
+    fun generateFakeFile(symbol: KSClassDeclaration): FileSpec {
         val packageName = symbol.packageName.asString()
         val className = symbol.toClassName().simpleName
         val generatedClassName = "Fake${className}"
 
         val functions = symbol.declarations.filterIsInstance<KSFunctionDeclaration>()
             .filter { it.getVisibility() != Visibility.PRIVATE }
-            // ignore IgnoreFake annotations:
-            .filter { it.annotations.none { annotation -> annotation.shortName.asString() == "IgnoreFake" } }
             .asIterable()
 
         val generatedFunctions = functions.map { function -> generateFunction(function) }
@@ -86,20 +35,17 @@ class FunctionProcessor(
             .addFunctions(generatedFunctions)
             .addProperties(functions.toPropSpec())
 
-        val fileSpec = FileSpec.builder(packageName, generatedClassName)
+        return FileSpec.builder(packageName, generatedClassName)
             .addType(classBuilder.build())
             .build()
-
-        fileSpec.writeTo(codeGenerator, dependencies = Dependencies(false, symbol.containingFile!!))
     }
 
-    private fun getConstructorParameters(functions: Iterable<KSFunctionDeclaration>) =
-        functions.map { function ->
-            ParameterSpec.builder(
-                name = getConstructorParameterName(function),
-                type = getLambdaOf(function),
-            ).defaultValue(function.toDefaultParameter()).build()
-        }
+    private fun getConstructorParameters(functions: Iterable<KSFunctionDeclaration>) = functions.map { function ->
+        ParameterSpec.builder(
+            name = getConstructorParameterName(function),
+            type = getLambdaOf(function),
+        ).defaultValue(function.toDefaultParameter()).build()
+    }
 
     private fun Iterable<KSFunctionDeclaration>.toPropSpec(): List<PropertySpec> = map { function ->
         PropertySpec
@@ -130,7 +76,10 @@ class FunctionProcessor(
         val funSpecBuilder = FunSpec.builder(function.simpleName.asString())
             .addParameters(
                 function.parameters.map { parameter ->
-                    ParameterSpec.builder(parameter.name!!.asString(), parameter.type.toTypeName()).build()
+                    ParameterSpec.builder(
+                        name = parameter.name!!.asString(),
+                        type = parameter.type.toTypeName(),
+                    ).build()
                 }
             )
             .returns(function.returnType!!.toTypeName())
@@ -148,7 +97,6 @@ class FunctionProcessor(
         return this
     }
 
-    // todo: add custom types
     private fun KSFunctionDeclaration.toDefaultParameter(): CodeBlock? {
         val returnType = returnType?.resolve()
         return when {
@@ -157,13 +105,30 @@ class FunctionProcessor(
                 null
             }
 
+            annotations.any { it.shortName.getShortName() == FakeReturnValue::class.simpleName } -> {
+                // Get `value` parameter from FakeReturnValue
+                val value = getFakeReturnValue()
+                    ?: return null
+                CodeBlock.of("{ ${lambdaParams()} $value }")
+            }
+
             else -> {
-                val defaultReturnValue = getBuiltInReturnValue(returnType)
+                val defaultReturnValue = getReturnValue(returnType)
                 val parametersDefault = this.parameters.joinToString { "_" }
-                CodeBlock.of("{ $parametersDefault -> $defaultReturnValue }")
+                CodeBlock.of("{ ${lambdaParams()}$defaultReturnValue }")
             }
         }
     }
+
+    private fun KSFunctionDeclaration.lambdaParams() = "${parameters.joinToString { "_" }} -> "
+        .takeIf { parameters.size > 1 }
+        .orEmpty()
+
+    private fun KSFunctionDeclaration.getFakeReturnValue() =
+        annotations.find { it.shortName.getShortName() == FakeReturnValue::class.simpleName }
+            ?.arguments?.find { it.name?.asString() == FakeReturnValue::value.name }
+            ?.value?.toString()
+            ?.removeSurrounding("\"")
 
     /**
      * Recursively generate instances of custom classes.
@@ -196,14 +161,14 @@ class FunctionProcessor(
             .filter { it.getVisibility() != Visibility.PRIVATE }
             .map { property ->
                 val propertyType = property.type.resolve()
-                val defaultValue = getBuiltInReturnValue(propertyType)
+                val defaultValue = getReturnValue(propertyType)
                 "${property.simpleName.getShortName()} = $defaultValue"
             }
             .joinToString(", ")
         return "${declaration.simpleName.getShortName()}($properties)"
     }
 
-    private fun getBuiltInReturnValue(returnType: KSType) = when (returnType.toTypeName()) {
+    private fun getReturnValue(returnType: KSType) = when (returnType.toTypeName()) {
         STRING -> "\"\""
         INT -> "0"
         DOUBLE -> "0.0"

@@ -24,4 +24,4 @@ rootProject.name = "fakes-generator"
 
 include(":annotations")
 include(":processor")
-include(":main-project")
+include(":main")

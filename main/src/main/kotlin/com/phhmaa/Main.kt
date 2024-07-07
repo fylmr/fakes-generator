@@ -16,10 +16,18 @@ data class Order(
 @GenerateFake
 internal interface OrderRepository {
     fun createOrder(order: Order)
+
+    @FakeReturnValue("Order(\"\", \"\", 123.0, 0, OrderDetails(0L, \"\"))")
     fun getOrder(id: String): Order
     fun deleteOrder(id: String)
     fun updateOrder(id: String, order: Order): Int?
 }
+
+//@GenerateFake
+//internal interface OrderRepositoryDescendant : OrderRepository
+
+@GenerateFake
+interface A
 
 fun main() {
 }

@@ -3,14 +3,16 @@ package com.phhmaa
 import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.processing.SymbolProcessorEnvironment
 import com.google.devtools.ksp.processing.SymbolProcessorProvider
+import com.phhmaa.generator.FakeFileGenerator
 
-
-class FunctionProcessorProvider : SymbolProcessorProvider {
+class GenerateFakeProcessorProvider : SymbolProcessorProvider {
 
     override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor {
-        return FunctionProcessor(
-            logger = environment.logger,
-            codeGenerator = environment.codeGenerator
+        return GenerateFakeProcessor(
+            codeGenerator = environment.codeGenerator,
+            fakeFileGenerator = FakeFileGenerator(
+                logger = environment.logger,
+            ),
         )
     }
 }
