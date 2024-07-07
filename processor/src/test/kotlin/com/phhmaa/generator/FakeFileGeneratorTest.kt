@@ -6,7 +6,6 @@ import com.tschuchort.compiletesting.SourceFile
 import com.tschuchort.compiletesting.symbolProcessorProviders
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.junit.jupiter.api.Assertions
-import kotlin.reflect.full.createInstance
 import kotlin.reflect.full.primaryConstructor
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -51,7 +50,6 @@ class FakeFileGeneratorTest {
         val compileSourcesResult = compileSources(kotlinSource)
 
         val clz = compileSourcesResult.classLoader.loadClass("FakeOrderRepository").kotlin
-        val instance = clz.createInstance() as Any
 
         // Check constructor
         assertEquals(1, clz.constructors.size)
