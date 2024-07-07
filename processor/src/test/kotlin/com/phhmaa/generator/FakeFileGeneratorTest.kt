@@ -6,14 +6,17 @@ import com.tschuchort.compiletesting.SourceFile
 import com.tschuchort.compiletesting.symbolProcessorProviders
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.junit.jupiter.api.Assertions
+import kotlin.reflect.full.createInstance
+import kotlin.reflect.full.primaryConstructor
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCompilerApi::class)
 class FakeFileGeneratorTest {
 
     @Test
-    fun a() {
+    fun `OrderRepository is generated`() {
         val kotlinSource = SourceFile.kotlin(
             "OrderRepository.kt",
             """       
@@ -48,37 +51,42 @@ class FakeFileGeneratorTest {
         val compileSourcesResult = compileSources(kotlinSource)
 
         val clz = compileSourcesResult.classLoader.loadClass("FakeOrderRepository").kotlin
+        val instance = clz.createInstance() as Any
 
         // Check constructor
         assertEquals(1, clz.constructors.size)
 
-        val constructor = clz.constructors.first()
+        val constructor = clz.primaryConstructor!!
         assertEquals(4, constructor.parameters.size)
 
-        val createOrderFake = constructor.parameters.find { it.name == "createOrderFake" }
-        assertEquals("(order: Order) -> kotlin.Unit", createOrderFake!!.type.toString())
+        val createOrderFake = constructor.parameters.first { it.name == "createOrderFake" }
+        assertEquals("(order: Order) -> kotlin.Unit", createOrderFake.type.toString())
+        assertTrue { createOrderFake.isOptional }
 
-        val getOrderFake = constructor.parameters.find { it.name == "getOrderFake" }
-        assertEquals("(id: kotlin.String) -> Order", getOrderFake!!.type.toString())
+        val getOrderFake = constructor.parameters.first { it.name == "getOrderFake" }
+        assertEquals("(id: kotlin.String) -> Order", getOrderFake.type.toString())
+        assertTrue { getOrderFake.isOptional }
 
-        val deleteOrderFake = constructor.parameters.find { it.name == "deleteOrderFake" }
-        assertEquals("(id: kotlin.String) -> kotlin.Unit", deleteOrderFake!!.type.toString())
+        val deleteOrderFake = constructor.parameters.first { it.name == "deleteOrderFake" }
+        assertEquals("(id: kotlin.String) -> kotlin.Unit", deleteOrderFake.type.toString())
+        assertTrue { deleteOrderFake.isOptional }
 
-        val updateOrderFake = constructor.parameters.find { it.name == "updateOrderFake" }
-        assertEquals("(id: kotlin.String, order: Order) -> kotlin.Int?", updateOrderFake!!.type.toString())
+        val updateOrderFake = constructor.parameters.first { it.name == "updateOrderFake" }
+        assertEquals("(id: kotlin.String, order: Order) -> kotlin.Int?", updateOrderFake.type.toString())
+        assertTrue { updateOrderFake.isOptional }
 
         // Check functions
-        val createOrder = clz.members.find { it.name == "createOrder" }
-        assertEquals("kotlin.Unit", createOrder?.returnType.toString())
+        val createOrder = clz.members.first { it.name == "createOrder" }
+        assertEquals("kotlin.Unit", createOrder.returnType.toString())
 
-        val getOrder = clz.members.find { it.name == "getOrder" }
-        assertEquals("Order", getOrder?.returnType.toString())
+        val getOrder = clz.members.first { it.name == "getOrder" }
+        assertEquals("Order", getOrder.returnType.toString())
 
-        val deleteOrder = clz.members.find { it.name == "deleteOrder" }
-        assertEquals("kotlin.Unit", deleteOrder?.returnType.toString())
+        val deleteOrder = clz.members.first { it.name == "deleteOrder" }
+        assertEquals("kotlin.Unit", deleteOrder.returnType.toString())
 
-        val updateOrder = clz.members.find { it.name == "updateOrder" }
-        assertEquals("kotlin.Int?", updateOrder?.returnType.toString())
+        val updateOrder = clz.members.first { it.name == "updateOrder" }
+        assertEquals("kotlin.Int?", updateOrder.returnType.toString())
     }
 
     private fun compileSources(kotlinSource: SourceFile): KotlinCompilation.Result {
