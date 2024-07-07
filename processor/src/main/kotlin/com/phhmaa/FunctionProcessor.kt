@@ -11,46 +11,46 @@ import com.squareup.kotlinpoet.ksp.toKModifier
 import com.squareup.kotlinpoet.ksp.toTypeName
 import com.squareup.kotlinpoet.ksp.writeTo
 
-
-/*
-Input:
-
-data class Order(
-    val id: String,
-    val name: String,
-    val price: Double,
-    val quantity: Int,
-)
-
-@GenerateFake
-internal interface OrderRepository {
-    fun createOrder(order: Order)
-    fun getOrder(id: String): Order
-    fun deleteOrder(id: String)
-
-    @IgnoreFake
-    fun updateOrder(id: String, order: Order): Int
-}
-
---
-
-Desired output:
-
-class FakeOrderRepository(
-    val fakeCreateOrder: (Order) -> Unit = {},
-    val fakeGetOrder: (String) -> Order = { Order("1", "fake order", 0.0, 0) },
-    val fakeDeleteOrder: (String) -> Unit = {},
-) : OrderRepository {
-    override fun createOrder(order: Order) = fakeCreateOrder(order)
-    override fun getOrder(id: String): Order = fakeGetOrder(id)
-    override fun deleteOrder(id: String) = fakeDeleteOrder(id)
-}
-*/
-
+/**
+ * This processor handles interfaces annotated with @GenerateFake.
+ * It generates a fake class for each annotated interface. The fake class contains a fake implementation for each
+ * function declared in the interface.
+ *
+ * Input:
+ * ```
+ * data class Order(
+ *     val id: String,
+ *     val name: String,
+ *     val price: Double,
+ *     val quantity: Int,
+ * )
+ *
+ * @GenerateFake
+ * internal interface OrderRepository {
+ *     fun createOrder(order: Order)
+ *     fun getOrder(id: String): Order
+ *     fun deleteOrder(id: String)
+ *
+ *     @IgnoreFake
+ *     fun updateOrder(id: String, order: Order): Int
+ * }
+ * ```
+ * Desired output:
+ * ```
+ * class FakeOrderRepository(
+ *     val fakeCreateOrder: (Order) -> Unit = {},
+ *     val fakeGetOrder: (String) -> Order = { Order("1", "fake order", 0.0, 0) },
+ *     val fakeDeleteOrder: (String) -> Unit = {},
+ * ) : OrderRepository {
+ *     override fun createOrder(order: Order) = fakeCreateOrder(order)
+ *     override fun getOrder(id: String): Order = fakeGetOrder(id)
+ *     override fun deleteOrder(id: String) = fakeDeleteOrder(id)
+ * }
+ * ```
+ */
 class FunctionProcessor(
-    private val options: Map<String, String>,
-    private val logger: KSPLogger,
     private val codeGenerator: CodeGenerator,
+    private val logger: KSPLogger,
 ) : SymbolProcessor {
     override fun process(resolver: Resolver): List<KSAnnotated> {
         val symbols = resolver.getSymbolsWithAnnotation(GenerateFake::class.qualifiedName!!)
@@ -69,7 +69,7 @@ class FunctionProcessor(
 
         val functions = symbol.declarations.filterIsInstance<KSFunctionDeclaration>()
             .filter { it.getVisibility() != Visibility.PRIVATE }
-            // ignore com.phhmaa.IgnoreFake annotations:
+            // ignore IgnoreFake annotations:
             .filter { it.annotations.none { annotation -> annotation.shortName.asString() == "IgnoreFake" } }
             .asIterable()
 
@@ -149,21 +149,27 @@ class FunctionProcessor(
         return this
     }
 
-    private fun KSFunctionDeclaration.toDefaultParameter(): CodeBlock {
-        val type = returnType?.resolve()
+    private fun KSFunctionDeclaration.toDefaultParameter(): CodeBlock? {
+        val returnType = returnType?.resolve()
         return when {
-            type == null -> {
+            returnType == null -> {
                 logger.error("Couldn't resolve return type for function $simpleName")
-                CodeBlock.of("null")
+                null
             }
-            type.isMarkedNullable -> CodeBlock.of("null")
-            type.toClassName() == INT -> CodeBlock.of("0")
-            type.toClassName() == UNIT -> CodeBlock.of("{}")
-            type.toClassName() == STRING -> CodeBlock.of("\"\"")
-            type.toClassName() == DOUBLE -> CodeBlock.of("0.0")
-            type.toClassName() == BOOLEAN -> CodeBlock.of("false")
-            type.toClassName() == LIST -> CodeBlock.of("emptyList()")
-            else -> CodeBlock.of("{}")
+
+            else -> {
+                val returnTypeName = returnType.toTypeName()
+                val defaultReturnValue = when (returnTypeName) {
+                    STRING -> "\"\""
+                    INT -> "0"
+                    DOUBLE -> "0.0"
+                    BOOLEAN -> "false"
+                    UNIT -> ""
+                    else -> "null" // Adjust based on your needs
+                }
+                val parametersDefault = this.parameters.joinToString { "_" }
+                CodeBlock.of("{ $parametersDefault -> $defaultReturnValue }")
+            }
         }
     }
 }

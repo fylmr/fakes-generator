@@ -10,10 +10,8 @@ data class Order(
 @GenerateFake
 internal interface OrderRepository {
     fun createOrder(order: Order)
-    fun getOrder(id: String): Order
+    fun getOrder(id: String): String
     fun deleteOrder(id: String)
-
-    @IgnoreFake
     fun updateOrder(id: String, order: Order): Int
 }
 
