@@ -79,22 +79,7 @@ class FunctionProcessor(
             .addOverride(symbol)
             .primaryConstructor(
                 FunSpec.constructorBuilder()
-                    .addParameters(
-                        functions.map { function ->
-                            ParameterSpec.builder(
-                                name = "${function.simpleName.getShortName()}Fake",
-                                type = LambdaTypeName.get(
-                                    parameters = function.parameters.map {
-                                        ParameterSpec(
-                                            it.name!!.asString(),
-                                            it.type.toTypeName()
-                                        )
-                                    },
-                                    returnType = function.returnType!!.toTypeName()
-                                ),
-                            ).defaultValue(function.toDefaultParameter()).build()
-                        }
-                    )
+                    .addParameters(getConstructorParameters(functions))
                     .build()
             )
             .addModifiers(symbol.modifiers.mapNotNull { it.toKModifier() })
@@ -108,24 +93,38 @@ class FunctionProcessor(
         fileSpec.writeTo(codeGenerator, dependencies = Dependencies(false, symbol.containingFile!!))
     }
 
+    private fun getConstructorParameters(functions: Iterable<KSFunctionDeclaration>) =
+        functions.map { function ->
+            ParameterSpec.builder(
+                name = getConstructorParameterName(function),
+                type = getLambdaOf(function),
+            ).defaultValue(function.toDefaultParameter()).build()
+        }
+
     private fun Iterable<KSFunctionDeclaration>.toPropSpec(): List<PropertySpec> = map { function ->
         PropertySpec
             .builder(
-                name = "${function.simpleName.getShortName()}Fake",
-                type = LambdaTypeName.get(
-                    parameters = function.parameters.map {
-                        ParameterSpec(
-                            it.name!!.asString(),
-                            it.type.toTypeName()
-                        )
-                    },
-                    returnType = function.returnType!!.toTypeName()
-                ),
+                name = getConstructorParameterName(function),
+                type = getLambdaOf(function),
             )
-            .initializer("${function.simpleName.getShortName()}Fake")
+            .initializer(getConstructorParameterName(function))
             .addModifiers(KModifier.PRIVATE)
             .build()
     }
+
+    private fun getConstructorParameterName(function: KSFunctionDeclaration) =
+        "${function.simpleName.getShortName()}Fake"
+
+    private fun getLambdaOf(function: KSFunctionDeclaration) =
+        LambdaTypeName.get(
+            parameters = function.parameters.map {
+                ParameterSpec(
+                    it.name!!.asString(),
+                    it.type.toTypeName()
+                )
+            },
+            returnType = function.returnType!!.toTypeName()
+        )
 
     private fun generateFunction(function: KSFunctionDeclaration): FunSpec {
         val funSpecBuilder = FunSpec.builder(function.simpleName.asString())
@@ -149,6 +148,7 @@ class FunctionProcessor(
         return this
     }
 
+    // todo: add custom types
     private fun KSFunctionDeclaration.toDefaultParameter(): CodeBlock? {
         val returnType = returnType?.resolve()
         return when {
@@ -158,18 +158,66 @@ class FunctionProcessor(
             }
 
             else -> {
-                val returnTypeName = returnType.toTypeName()
-                val defaultReturnValue = when (returnTypeName) {
-                    STRING -> "\"\""
-                    INT -> "0"
-                    DOUBLE -> "0.0"
-                    BOOLEAN -> "false"
-                    UNIT -> ""
-                    else -> "null" // Adjust based on your needs
-                }
+                val defaultReturnValue = getBuiltInReturnValue(returnType)
                 val parametersDefault = this.parameters.joinToString { "_" }
                 CodeBlock.of("{ $parametersDefault -> $defaultReturnValue }")
             }
         }
+    }
+
+    /**
+     * Recursively generate instances of custom classes.
+     * For example, for this class
+     * ```
+     * data class Order(
+     *     val id: String,
+     *     val name: String,
+     *     val price: Double,
+     *     val quantity: Int,
+     * )
+     * ```
+     * the generated code will be
+     * ```
+     * Order("", "", 0.0, 0)
+     * ```
+     */
+    private fun generateCustomReturnValue(returnType: KSType): String {
+        if (returnType.isMarkedNullable) {
+            return "null"
+        }
+
+        val declaration = returnType.declaration as? KSClassDeclaration
+        if (declaration == null) {
+            logger.error("Couldn't resolve class declaration for type $returnType")
+            return ""
+        }
+
+        val properties = declaration.declarations.filterIsInstance<KSPropertyDeclaration>()
+            .filter { it.getVisibility() != Visibility.PRIVATE }
+            .map { property ->
+                val propertyType = property.type.resolve()
+                val defaultValue = getBuiltInReturnValue(propertyType)
+                "${property.simpleName.getShortName()} = $defaultValue"
+            }
+            .joinToString(", ")
+        return "${declaration.simpleName.getShortName()}($properties)"
+    }
+
+    private fun getBuiltInReturnValue(returnType: KSType) = when (returnType.toTypeName()) {
+        STRING -> "\"\""
+        INT -> "0"
+        DOUBLE -> "0.0"
+        BOOLEAN -> "false"
+        LONG -> "0L"
+        CHAR -> "''"
+        BYTE -> "0.toByte()"
+        SHORT -> "0.toShort()"
+        FLOAT -> "0.0f"
+        UNIT -> ""
+        LIST -> "emptyList()"
+        SET -> "emptySet()"
+        MAP -> "emptyMap()"
+        ARRAY -> "emptyArray()"
+        else -> generateCustomReturnValue(returnType)
     }
 }
