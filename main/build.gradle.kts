@@ -8,7 +8,6 @@ application {
     mainClass.set("com.phhmaa.MainKt")
 }
 
-// Makes generated code visible to IDE
 kotlin.sourceSets.main {
     kotlin.srcDirs(
         file("$buildDir/generated/ksp/main/kotlin"),

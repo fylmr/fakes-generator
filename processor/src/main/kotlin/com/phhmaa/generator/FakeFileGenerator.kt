@@ -35,7 +35,8 @@ class FakeFileGenerator(
             .addFunctions(generatedFunctions)
             .addProperties(functions.toPropSpec())
 
-        return FileSpec.builder(packageName, generatedClassName)
+        return FileSpec
+            .builder(packageName = packageName, fileName = generatedClassName)
             .addType(classBuilder.build())
             .build()
     }
@@ -114,12 +115,26 @@ class FakeFileGenerator(
 
             else -> {
                 val defaultReturnValue = getReturnValue(returnType)
-                val parametersDefault = this.parameters.joinToString { "_" }
                 CodeBlock.of("{ ${lambdaParams()}$defaultReturnValue }")
             }
         }
     }
 
+    /**
+     * Generate lambda parameters for functions with more than one parameter.
+     * For example, for this function
+     * ```
+     * fun updateOrder(id: String, order: Order): Int?
+     * ```
+     * the generated code will be `_, _ ->`.
+     *
+     * If the function has only one parameter, return an empty string.
+     * For example, for this function
+     * ```
+     * fun deleteOrder(id: String)
+     * ```
+     * the generated code will be an empty string.
+     */
     private fun KSFunctionDeclaration.lambdaParams() = "${parameters.joinToString { "_" }} -> "
         .takeIf { parameters.size > 1 }
         .orEmpty()

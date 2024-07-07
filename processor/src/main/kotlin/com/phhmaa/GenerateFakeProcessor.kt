@@ -76,5 +76,4 @@ class GenerateFakeProcessor(
         }
         return emptyList()
     }
-
 }
