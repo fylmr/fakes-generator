@@ -83,7 +83,15 @@ class FunctionProcessor(
                         functions.map { function ->
                             ParameterSpec.builder(
                                 name = "${function.simpleName.getShortName()}Fake",
-                                type = function.returnType!!.toTypeName(),
+                                type = LambdaTypeName.get(
+                                    parameters = function.parameters.map {
+                                        ParameterSpec(
+                                            it.name!!.asString(),
+                                            it.type.toTypeName()
+                                        )
+                                    },
+                                    returnType = function.returnType!!.toTypeName()
+                                ),
                             ).defaultValue(function.toDefaultParameter()).build()
                         }
                     )
@@ -104,7 +112,15 @@ class FunctionProcessor(
         PropertySpec
             .builder(
                 name = "${function.simpleName.getShortName()}Fake",
-                type = function.returnType!!.toTypeName(),
+                type = LambdaTypeName.get(
+                    parameters = function.parameters.map {
+                        ParameterSpec(
+                            it.name!!.asString(),
+                            it.type.toTypeName()
+                        )
+                    },
+                    returnType = function.returnType!!.toTypeName()
+                ),
             )
             .initializer("${function.simpleName.getShortName()}Fake")
             .addModifiers(KModifier.PRIVATE)
@@ -118,6 +134,8 @@ class FunctionProcessor(
                     ParameterSpec.builder(parameter.name!!.asString(), parameter.type.toTypeName()).build()
                 }
             )
+            .returns(function.returnType!!.toTypeName())
+            .addStatement("return ${function.simpleName.getShortName()}Fake(${function.parameters.joinToString { it.name!!.asString() }})") // e.g. fakeCreateOrder(order)
             .addModifiers(KModifier.OVERRIDE)
         return funSpecBuilder.build()
     }
@@ -134,9 +152,17 @@ class FunctionProcessor(
     private fun KSFunctionDeclaration.toDefaultParameter(): CodeBlock {
         val type = returnType?.resolve()
         return when {
-            type == null -> throw IllegalStateException("Return type of function $simpleName is null")
-            type.isFunctionType -> CodeBlock.of("{}")
+            type == null -> {
+                logger.error("Couldn't resolve return type for function $simpleName")
+                CodeBlock.of("null")
+            }
             type.isMarkedNullable -> CodeBlock.of("null")
+            type.toClassName() == INT -> CodeBlock.of("0")
+            type.toClassName() == UNIT -> CodeBlock.of("{}")
+            type.toClassName() == STRING -> CodeBlock.of("\"\"")
+            type.toClassName() == DOUBLE -> CodeBlock.of("0.0")
+            type.toClassName() == BOOLEAN -> CodeBlock.of("false")
+            type.toClassName() == LIST -> CodeBlock.of("emptyList()")
             else -> CodeBlock.of("{}")
         }
     }
