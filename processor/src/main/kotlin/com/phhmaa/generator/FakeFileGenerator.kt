@@ -13,6 +13,7 @@ class FakeFileGenerator(
     private val logger: KSPLogger,
 ) {
 
+    // todo add inherited methods/properties generation
     fun generateFakeFile(symbol: KSClassDeclaration): FileSpec {
         val packageName = symbol.packageName.asString()
         val className = symbol.toClassName().simpleName
@@ -24,16 +25,24 @@ class FakeFileGenerator(
 
         val generatedFunctions = functions.map { function -> generateFunction(function) }
 
+        val fields = symbol.declarations.filterIsInstance<KSPropertyDeclaration>()
+            .filter { it.getVisibility() != Visibility.PRIVATE }
+            .asIterable()
+
+        val generatedFields = fields.map { field -> generateField(field) }
+
         val classBuilder = TypeSpec.classBuilder(generatedClassName)
             .addOverride(symbol)
             .primaryConstructor(
                 FunSpec.constructorBuilder()
-                    .addParameters(getConstructorParameters(functions))
+                    .addParameters(functions.getConstructorParameters())
+                    .addParameters(fields.getFieldConstructorParameters())
                     .build()
             )
             .addModifiers(symbol.modifiers.mapNotNull { it.toKModifier() })
             .addFunctions(generatedFunctions)
             .addProperties(functions.toPropSpec())
+            .addProperties(generatedFields)
 
         return FileSpec
             .builder(packageName = packageName, fileName = generatedClassName)
@@ -41,13 +50,33 @@ class FakeFileGenerator(
             .build()
     }
 
-    private fun getConstructorParameters(functions: Iterable<KSFunctionDeclaration>) = functions.map { function ->
-        ParameterSpec.builder(
-            name = getConstructorParameterName(function),
-            type = getLambdaOf(function),
-        ).defaultValue(function.toDefaultParameter()).build()
+    /**
+     * Generate constructor parameters for the generated class.
+     * @see toPropSpec
+     */
+    private fun Iterable<KSFunctionDeclaration>.getConstructorParameters() = map { function ->
+        ParameterSpec
+            .builder(
+                name = getConstructorParameterName(function),
+                type = getLambdaOf(function),
+            )
+            .defaultValue(function.toDefaultParameter())
+            .build()
     }
 
+    private fun Iterable<KSPropertyDeclaration>.getFieldConstructorParameters() = map { field ->
+        ParameterSpec
+            .builder(
+                name = getConstructorParameterName(field),
+                type = getLambdaOf(field),
+            )
+            .defaultValue(field.toDefaultParameter())
+            .build()
+    }
+
+    /**
+     * Generate properties = constructor parameters ([getConstructorParameters]) for the generated class.
+     */
     private fun Iterable<KSFunctionDeclaration>.toPropSpec(): List<PropertySpec> = map { function ->
         PropertySpec
             .builder(
@@ -59,7 +88,7 @@ class FakeFileGenerator(
             .build()
     }
 
-    private fun getConstructorParameterName(function: KSFunctionDeclaration) =
+    private fun getConstructorParameterName(function: KSDeclaration) =
         "${function.simpleName.getShortName()}Fake"
 
     private fun getLambdaOf(function: KSFunctionDeclaration) =
@@ -71,6 +100,12 @@ class FakeFileGenerator(
                 )
             },
             returnType = function.returnType!!.toTypeName()
+        )
+
+    private fun getLambdaOf(field: KSPropertyDeclaration) =
+        LambdaTypeName.get(
+            parameters = emptyList(),
+            returnType = field.type.toTypeName(),
         )
 
     private fun generateFunction(function: KSFunctionDeclaration): FunSpec {
@@ -87,6 +122,13 @@ class FakeFileGenerator(
             .addStatement("return ${function.simpleName.getShortName()}Fake(${function.parameters.joinToString { it.name!!.asString() }})") // e.g. fakeCreateOrder(order)
             .addModifiers(KModifier.OVERRIDE)
         return funSpecBuilder.build()
+    }
+
+    private fun generateField(field: KSPropertyDeclaration): PropertySpec {
+        val propertySpecBuilder = PropertySpec.builder(field.simpleName.asString(), field.type.toTypeName())
+            .initializer("${field.simpleName.getShortName()}Fake()")
+            .addModifiers(KModifier.OVERRIDE)
+        return propertySpecBuilder.build()
     }
 
     private fun TypeSpec.Builder.addOverride(from: KSClassDeclaration): TypeSpec.Builder {
@@ -120,6 +162,23 @@ class FakeFileGenerator(
         }
     }
 
+    private fun KSPropertyDeclaration.toDefaultParameter(): CodeBlock? {
+        val returnType = type.resolve()
+        return when {
+            annotations.any { it.shortName.getShortName() == FakeReturnValue::class.simpleName } -> {
+                // Get `value` parameter from FakeReturnValue
+                val value = getFakeReturnValue()
+                    ?: return null
+                CodeBlock.of("{ $value }")
+            }
+
+            else -> {
+                val defaultReturnValue = getReturnValue(returnType)
+                CodeBlock.of("{$defaultReturnValue}")
+            }
+        }
+    }
+
     /**
      * Generate lambda parameters for functions with more than one parameter.
      * For example, for this function
@@ -139,7 +198,7 @@ class FakeFileGenerator(
         .takeIf { parameters.size > 1 }
         .orEmpty()
 
-    private fun KSFunctionDeclaration.getFakeReturnValue() =
+    private fun KSDeclaration.getFakeReturnValue() =
         annotations.find { it.shortName.getShortName() == FakeReturnValue::class.simpleName }
             ?.arguments?.find { it.name?.asString() == FakeReturnValue::value.name }
             ?.value?.toString()
@@ -189,7 +248,7 @@ class FakeFileGenerator(
         DOUBLE -> "0.0"
         BOOLEAN -> "false"
         LONG -> "0L"
-        CHAR -> "''"
+        CHAR -> "' '"
         BYTE -> "0.toByte()"
         SHORT -> "0.toShort()"
         FLOAT -> "0.0f"

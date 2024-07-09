@@ -15,6 +15,10 @@ data class Order(
 
 @GenerateFake
 internal interface OrderRepository {
+    val defaultOrder: Order
+    val aUnit: Unit
+    val aPrimitive: Char
+
     fun createOrder(order: Order)
 
     @FakeReturnValue("Order(\"\", \"\", 123.0, 0, OrderDetails(0L, \"\"))")
