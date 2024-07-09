@@ -13,8 +13,12 @@ data class Order(
     val details: OrderDetails,
 )
 
+interface AbstractRepository {
+    fun initA()
+}
+
 @GenerateFake
-internal interface OrderRepository {
+internal interface OrderRepository : AbstractRepository {
     val defaultOrder: Order
     val aUnit: Unit
     val aPrimitive: Char
